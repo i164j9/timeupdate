@@ -22,7 +22,7 @@ Sync a Debian Linux system’s time, date, and timezone from an Android device o
 
 1. Ensure Python 3 is available.
 2. Install ADB if you plan to use USB mode.
-3. Place the script in a directory (this repo contains it already).
+3. Place the script in a directory.
 
 ## Usage
 
