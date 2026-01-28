@@ -9,6 +9,7 @@ Sync a Debian Linux system’s time, date, and timezone from an Android device o
 - Root checks and clear diagnostics
 - Robust parsing of Android date output
 - Debug logging to `/tmp/timeupdate_debug.log`
+- Optional GPS location logging (if available)
 
 ## Requirements
 
@@ -57,9 +58,11 @@ Create a text file with the following format:
 DATE=YYYY-MM-DD
 TIME=HH:MM:SS
 TZ=Region/City
+LAT=12.3456
+LON=-98.7654
 ```
 
-`TZ` is optional. If omitted, only the time and date are updated.
+`TZ`, `LAT`, and `LON` are optional. If omitted, only the time and date are updated.
 
 Example:
 
@@ -67,6 +70,8 @@ Example:
 DATE=2026-01-27
 TIME=15:42:00
 TZ=America/New_York
+LAT=40.7128
+LON=-74.0060
 ```
 
 ## Logging
@@ -75,6 +80,8 @@ The script logs to:
 
 - Standard output
 - `/tmp/timeupdate_debug.log`
+
+When available, GPS coordinates are logged alongside the time update event.
 
 ## Troubleshooting
 

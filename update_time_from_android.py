@@ -99,13 +99,14 @@ def get_android_time():
 
 
 def get_bluetooth_timeinfo(filepath="/tmp/bluetooth/timeinfo.txt"):
-    """Read date, time, and optional timezone from a Bluetooth file."""
+    """Read date/time and optional timezone/location from a Bluetooth file."""
     if not os.path.exists(filepath):
         debug_log(f"Bluetooth time info file not found: {filepath}")
         sys.exit(1)
     with open(filepath, "r", encoding="utf-8") as f:
         lines = f.readlines()
     date, time_str, tz = None, None, None
+    lat, lon = None, None
     for line in lines:
         if line.startswith("DATE="):
             date = line.strip().split("=", 1)[1]
@@ -113,10 +114,14 @@ def get_bluetooth_timeinfo(filepath="/tmp/bluetooth/timeinfo.txt"):
             time_str = line.strip().split("=", 1)[1]
         elif line.startswith("TZ="):
             tz = line.strip().split("=", 1)[1]
+        elif line.startswith("LAT="):
+            lat = line.strip().split("=", 1)[1]
+        elif line.startswith("LON="):
+            lon = line.strip().split("=", 1)[1]
     if not (date and time_str):
         debug_log("Bluetooth time info file missing DATE or TIME.")
         sys.exit(1)
-    return date + " " + time_str, tz
+    return date + " " + time_str, tz, lat, lon
 
 
 def get_android_timezone():
@@ -133,6 +138,32 @@ def get_android_timezone():
     except (FileNotFoundError, subprocess.CalledProcessError) as e:
         debug_log(f"Failed to get timezone from Android device: {e}")
         sys.exit(1)
+
+
+def get_android_location():
+    """Return last known Android location as (lat, lon) strings."""
+    try:
+        result = subprocess.run(
+            ["adb", "shell", "dumpsys", "location"],
+            check=True,
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+        output = result.stdout
+    except (FileNotFoundError, subprocess.CalledProcessError) as e:
+        debug_log(f"Failed to get location from Android device: {e}")
+        return None, None
+
+    patterns = [
+        r"last location=Location\[\w+ (-?\d+\.\d+),(-?\d+\.\d+)",
+        r"Location\[\w+ (-?\d+\.\d+),(-?\d+\.\d+)",
+        r"\s(-?\d+\.\d+),(-?\d+\.\d+)\s*\(\w+\)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, output)
+        if match:
+            return match.group(1), match.group(2)
+    return None, None
 
 
 def set_system_time(datetime_str):
@@ -240,12 +271,21 @@ def main():
             debug_log(
                 f"Getting time and timezone from Bluetooth file: {args.btfile}"
             )
-            datetime_str, android_tz = get_bluetooth_timeinfo(args.btfile)
+            datetime_str, android_tz, lat, lon = get_bluetooth_timeinfo(
+                args.btfile
+            )
             if android_tz:
                 set_system_timezone(android_tz)
             else:
                 debug_log("No timezone info found in Bluetooth file.")
             set_system_time(datetime_str)
+            if lat and lon:
+                debug_log(
+                    "Location at update (Bluetooth): "
+                    f"lat={lat}, lon={lon}"
+                )
+            else:
+                debug_log("No location info found in Bluetooth file.")
         else:
             check_adb()
             debug_log(
@@ -254,6 +294,7 @@ def main():
             )
             android_time = get_android_time()
             android_tz = get_android_timezone()
+            lat, lon = get_android_location()
             match = re.match(
                 r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", android_time)
             if not match:
@@ -266,6 +307,13 @@ def main():
             else:
                 debug_log("No timezone info found on Android device.")
             set_system_time(datetime_str)
+            if lat and lon:
+                debug_log(
+                    "Location at update (ADB): "
+                    f"lat={lat}, lon={lon}"
+                )
+            else:
+                debug_log("No location info found from Android device.")
     except (OSError, subprocess.CalledProcessError, ValueError) as exc:
         debug_log(f"Top-level exception: {exc}")
         traceback.print_exc()
