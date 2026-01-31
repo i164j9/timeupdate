@@ -322,3 +322,33 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+#Device 013: ID 18d1:4ee7 Google Inc. Nexus/Pixel Device (charging + debug)
+"""
+Create a udev rule that triggers a systemd service on USB connect, and a service unit that runs the script as root.
+
+1) systemd service unit
+Create etc/systemd/system/timeupdate-android.service with:
+
+[Unit]
+Description=Sync time/timezone from Android over ADB
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /home/dev/timeupdate/update_time_from_android.py
+
+[Install]
+WantedBy=multi-user.target
+
+2) udev rule
+Create etc/udev/rules.d/99-android-timeupdate.rules with (replace idVendor with your device’s vendor ID):
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="118d1", TAG+="systemd", ENV{SYSTEMD_WANTS}="timeupdate-android.service"
+
+3) Reload udev and systemd, then replug the device.
+
+Notes:
+
+USB debugging must be enabled and the device authorized.
+If you want to support multiple vendors, add more rules with their idVendor values.
+"""
