@@ -21,6 +21,21 @@ def debug_log(msg):
         pass
 
 
+def format_adb_error(exc):
+    """Return a helpful error string for adb subprocess failures."""
+    if isinstance(exc, subprocess.CalledProcessError):
+        stderr = (exc.stderr or "").strip()
+        stdout = (exc.stdout or "").strip()
+        details = []
+        if stdout:
+            details.append(f"stdout: {stdout}")
+        if stderr:
+            details.append(f"stderr: {stderr}")
+        detail_str = f" ({'; '.join(details)})" if details else ""
+        return f"exit status {exc.returncode}{detail_str}"
+    return str(exc)
+
+
 def check_python_version():
     """Ensure the script is running on Python 3."""
     if sys.version_info[0] < 3:
@@ -51,6 +66,37 @@ def check_adb():
         sys.exit(1)
 
 
+def check_adb_device():
+    """Ensure an authorized, online ADB device is connected."""
+    try:
+        devices = subprocess.run(
+            ["adb", "devices"],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError) as e:
+        debug_log(f"Failed to list ADB devices: {e}")
+        sys.exit(1)
+
+    lines = [line.strip() for line in devices.stdout.splitlines()]
+    device_lines = [line for line in lines if line and not line.startswith("List of devices")]
+    if not device_lines:
+        debug_log("No ADB devices detected. Is the device connected and USB debugging enabled?")
+        sys.exit(1)
+
+    statuses = [line.split() for line in device_lines if line.split()]
+    offline = [s for s in statuses if len(s) >= 2 and s[1] == "offline"]
+    unauthorized = [s for s in statuses if len(s) >= 2 and s[1] == "unauthorized"]
+    if unauthorized:
+        debug_log("ADB device unauthorized. Unlock the phone and accept the USB debugging prompt.")
+        sys.exit(1)
+    if offline:
+        debug_log("ADB device is offline. Replug the device or restart ADB (adb kill-server).")
+        sys.exit(1)
+
+
 def get_android_time():
     """Return Android device time as 'YYYY-MM-DD HH:MM:SS' via ADB."""
     # Try custom format first
@@ -59,19 +105,23 @@ def get_android_time():
             ["adb", "shell", "date", "+%Y-%m-%d %H:%M:%S"],
             check=True,
             stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
+            timeout=10,
         )
         output = result.stdout.strip()
         return output
     except (FileNotFoundError, subprocess.CalledProcessError) as e:
-        debug_log(f"Custom date format failed: {e}")
+        debug_log(f"Custom date format failed: {format_adb_error(e)}")
         # Fallback: try default date output and parse
         try:
             result = subprocess.run(
                 ["adb", "shell", "date"],
                 check=True,
                 stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
+                timeout=10,
             )
             output = result.stdout.strip()
             debug_log(f"Raw Android date output: {output}")
@@ -94,7 +144,15 @@ def get_android_time():
                 debug_log(f"Could not parse Android date output: {output}")
                 sys.exit(1)
         except (FileNotFoundError, subprocess.CalledProcessError) as e3:
-            debug_log(f"Failed to get date/time from Android device: {e3}")
+            debug_log(
+                "Failed to get date/time from Android device: "
+                f"{format_adb_error(e3)}"
+            )
+            debug_log(
+                "Troubleshooting: ensure the device is unlocked, USB debugging "
+                "is enabled/authorized, and try reconnecting the cable or "
+                "restarting ADB (adb kill-server)."
+            )
             sys.exit(1)
 
 
@@ -288,6 +346,7 @@ def main():
                 debug_log("No location info found in Bluetooth file.")
         else:
             check_adb()
+            check_adb_device()
             debug_log(
                 "Getting time and timezone from Android device over USB "
                 "(ADB)..."
@@ -323,32 +382,36 @@ def main():
 if __name__ == "__main__":
     main()
 
-#Device 013: ID 18d1:4ee7 Google Inc. Nexus/Pixel Device (charging + debug)
-"""
-Create a udev rule that triggers a systemd service on USB connect, and a service unit that runs the script as root.
+# Device 013: ID 18d1:4ee7 Google Inc. Nexus/Pixel Device (charging + debug)
+#
+# Create a udev rule that triggers a systemd service on USB connect, and a
+# service unit that runs the script as root.
 
-1) systemd service unit
-Create etc/systemd/system/timeupdate-android.service with:
+# 1) systemd service unit
+# Create etc/systemd/system/timeupdate-android.service with:
 
-[Unit]
-Description=Sync time/timezone from Android over ADB
-After=network.target
+# [Unit]
+# Description=Sync time/timezone from Android over ADB
+# After=network.target
 
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/python3 /home/dev/timeupdate/update_time_from_android.py
+# [Service]
+# Type=oneshot
+# ExecStart=/usr/bin/python3 /home/dev/timeupdate/update_time_from_android.py
 
-[Install]
-WantedBy=multi-user.target
+# [Install]
+# WantedBy=multi-user.target
 
-2) udev rule
-Create etc/udev/rules.d/99-android-timeupdate.rules with (replace idVendor with your device’s vendor ID):
-ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="118d1", TAG+="systemd", ENV{SYSTEMD_WANTS}="timeupdate-android.service"
+# 2) udev rule
+# Create etc/udev/rules.d/99-android-timeupdate.rules with
+# (replace idVendor with your device’s vendor ID):
+# ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="118d1", TAG+="systemd",
+# ENV{SYSTEMD_WANTS}="timeupdate-android.service"
 
-3) Reload udev and systemd, then replug the device.
+# 3) Reload udev and systemd, then replug the device.
 
-Notes:
+# Notes:
 
-USB debugging must be enabled and the device authorized.
-If you want to support multiple vendors, add more rules with their idVendor values.
-"""
+# USB debugging must be enabled and the device authorized.
+# If you want to support multiple vendors, add more rules with their idVendor
+# values.
+#
