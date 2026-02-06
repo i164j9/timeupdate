@@ -125,16 +125,22 @@ def get_android_time():
             )
             output = result.stdout.strip()
             debug_log(f"Raw Android date output: {output}")
-            # Parse: 'Tue Jan 27 20:37:13 EST 2026' (ignore timezone)
+            # Parse: 'Tue Jan 27 20:37:13 EST 2026' or 'Wed Feb  4 20:04:30 EST 2026' (ignore timezone)
             m = re.match(
-                r"\w+ (\w+) (\d+) (\d{2}):(\d{2}):(\d{2}) \w+ (\d{4})", output)
+                r"\w+ (\w+)\s+(\d{1,2}) (\d{2}):(\d{2}):(\d{2}) \w+ (\d{4})", output)
             if m:
                 month_str, day, hour, minute, second, year = m.groups()
                 try:
-                    month = list(calendar.month_abbr).index(month_str)
-                except ValueError:
-                    debug_log(f"Unknown month abbreviation: {month_str}")
-                    sys.exit(1)
+                    # Try both abbreviated and full month names
+                    if month_str in calendar.month_abbr:
+                        month = list(calendar.month_abbr).index(month_str)
+                    elif month_str in calendar.month_name:
+                        month = list(calendar.month_name).index(month_str)
+                    else:
+                        raise ValueError(f"Unknown month abbreviation: {month_str}")
+                except ValueError as ve:
+                    debug_log(str(ve))
+                    raise RuntimeError(f"Failed to parse month: {month_str}")
                 formatted = (
                     f"{year}-{month:02d}-{int(day):02d} "
                     f"{hour}:{minute}:{second}"
@@ -142,7 +148,7 @@ def get_android_time():
                 return formatted
             else:
                 debug_log(f"Could not parse Android date output: {output}")
-                sys.exit(1)
+                raise RuntimeError("Could not parse Android date output")
         except (FileNotFoundError, subprocess.CalledProcessError) as e3:
             debug_log(
                 "Failed to get date/time from Android device: "
@@ -153,7 +159,7 @@ def get_android_time():
                 "is enabled/authorized, and try reconnecting the cable or "
                 "restarting ADB (adb kill-server)."
             )
-            sys.exit(1)
+            raise RuntimeError("Failed to get date/time from Android device")
 
 
 def get_bluetooth_timeinfo(filepath="/tmp/bluetooth/timeinfo.txt"):
@@ -373,10 +379,11 @@ def main():
                 )
             else:
                 debug_log("No location info found from Android device.")
-    except (OSError, subprocess.CalledProcessError, ValueError) as exc:
+    except (OSError, subprocess.CalledProcessError, ValueError, RuntimeError) as exc:
         debug_log(f"Top-level exception: {exc}")
         traceback.print_exc()
-        sys.exit(1)
+        print("Fatal error occurred. See debug log above for details.")
+        return
 
 
 if __name__ == "__main__":
